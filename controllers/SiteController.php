@@ -2,132 +2,51 @@
 
 namespace app\controllers;
 
-use Yii;
-use yii\filters\AccessControl;
+use app\models\Couponsdata;
 use yii\web\Controller;
-use yii\web\Response;
-use yii\filters\VerbFilter;
-use app\models\LoginForm;
-use app\models\ContactForm;
+use app\models\ShopsData;
+use yii\db\ActiveRecord;
 
 class SiteController extends Controller
 {
-    /**
-     * {@inheritdoc}
-     */
-    public function behaviors()
-    {
-        return [
-            'access' => [
-                'class' => AccessControl::className(),
-                'only' => ['logout'],
-                'rules' => [
-                    [
-                        'actions' => ['logout'],
-                        'allow' => true,
-                        'roles' => ['@'],
-                    ],
-                ],
-            ],
-            'verbs' => [
-                'class' => VerbFilter::className(),
-                'actions' => [
-                    'logout' => ['post'],
-                ],
-            ],
-        ];
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function actions()
-    {
-        return [
-            'error' => [
-                'class' => 'yii\web\ErrorAction',
-            ],
-            'captcha' => [
-                'class' => 'yii\captcha\CaptchaAction',
-                'fixedVerifyCode' => YII_ENV_TEST ? 'testme' : null,
-            ],
-        ];
-    }
-
-    /**
-     * Displays homepage.
-     *
-     * @return string
-     */
     public function actionIndex()
     {
-        return $this->render('index');
-    }
-
-    /**
-     * Login action.
-     *
-     * @return Response|string
-     */
-    public function actionLogin()
-    {
-        if (!Yii::$app->user->isGuest) {
-            return $this->goHome();
+        set_time_limit(120);
+        #Couponsdata::clearTable();
+        $url = 'https://www.coupons.com/coupon-codes/stores/';
+        $proxy_ip = '173.44.37.82:1080';
+        $mainHtml = ShopsData::curl_get($url, $proxy_ip);
+        $mainDom = str_get_html($mainHtml);
+        $stores = $mainDom->find(".item");
+        foreach ($stores as $store) {
+            $nameStores = $store->plaintext;
+            $aTag = $store->find('a', 0);
+            $storesUrl = $aTag->href;
+            ShopsData::insShopData($nameStores, $storesUrl);
         }
-
-        $model = new LoginForm();
-        if ($model->load(Yii::$app->request->post()) && $model->login()) {
-            return $this->goBack();
+        for ($i = 1; $i <= count($stores); $i++) {
+            $getShop = ShopsData::getShopUrl($i);
+            if ($getShop != NULL) {
+                foreach ($getShop as $eachShop) {
+                    $storeHtml = ShopsData::curl_get($eachShop, $proxy_ip);
+                    $storeDom = str_get_html($storeHtml);
+                    $coupons = $storeDom->find(".coupons-row-detail");
+                    foreach ($coupons as $coupon) {
+                        $titleCoup = $coupon->find(".couponTitle", 0);
+                        $couponTitle = $titleCoup->plaintext;
+                        $couponContent = $coupon->find(".coupon-description", 0);
+                        $couponContentValue = $couponContent->plaintext;
+                        $couponEndsAt = $coupon->find("div.expire-row span", 0);
+                        $couponEndsAtValue = $couponEndsAt->plaintext;
+                        $formatEndsDate = strtotime($couponEndsAtValue);
+                        $d2 = date("Y-m-d", $formatEndsDate);
+                        if (CouponsData::insCoupData($i, $couponTitle, $couponContentValue, $d2) == false) {
+                            continue;
+                        }
+                    }
+                    ShopsData::parsedUrl($i);
+                }
+            }
         }
-
-        $model->password = '';
-        return $this->render('login', [
-            'model' => $model,
-        ]);
-    }
-
-    /**
-     * Logout action.
-     *
-     * @return Response
-     */
-    public function actionLogout()
-    {
-        Yii::$app->user->logout();
-
-        return $this->goHome();
-    }
-
-    /**
-     * Displays contact page.
-     *
-     * @return Response|string
-     */
-    public function actionContact()
-    {
-        $model = new ContactForm();
-        if ($model->load(Yii::$app->request->post()) && $model->contact(Yii::$app->params['adminEmail'])) {
-            Yii::$app->session->setFlash('contactFormSubmitted');
-
-            return $this->refresh();
-        }
-        return $this->render('contact', [
-            'model' => $model,
-        ]);
-    }
-
-    public function actionTest()
-    {
-        return $this->render('test');
-    }
-
-    /**
-     * Displays about page.
-     *
-     * @return string
-     */
-    public function actionAbout()
-    {
-        return $this->render('about');
     }
 }
